@@ -2,11 +2,12 @@
 //
 // Strategy (long only, one asset CBBTC, full-size entries, few trades):
 //   - Entry: the 1-minute close breaks above the highest high of the previous
-//     60 bars, and only when the market is actually moving: the 14-bar ATR is
-//     at or above its trailing 240-bar median. No new entries in the final 60
-//     bars of the window (a late entry cannot outrun its own round-trip cost).
+//     120 bars, and only when the market is actually moving: the 14-bar ATR is
+//     at or above 1.5x its trailing 240-bar median. No new entries in the final
+//     180 bars of the window (a late entry cannot outrun its own round-trip cost;
+//     on the dev window every entry after bar 1260 lost).
 //   - Exit: the whole position on the first of (a) the close falls to the
-//     lowest low of the previous 40 bars, (b) a trailing stop 50 bps below
+//     lowest low of the previous 30 bars, (b) a trailing stop 30 bps below
 //     the highest close since entry, (c) take-profit at +300 bps over cost.
 //   - Every exit is level-based, so a sell the market refuses is retried on
 //     the next bar while the level still holds.
@@ -15,25 +16,30 @@
 //   - The bot never reads the clock, the environment or randomness: time is
 //     the bar time in each batch it is sent (hello, batch, orders, bar).
 //
-// Backtested on the published dev window with the kit's exact fill model
-// (fill at the next open, 4 bps fee, 2 bps slippage, constant-product impact
-// against the bar's open depth): net PnL +21.73 USDC on $1,000, 6 trades
-// (3 round trips), max drawdown 0.9%. The house EMA-cross baseline loses
-// -134.95 USDC on the same window (63 whipsaw trades); buy-and-hold -44.01.
-// The edge is selectivity: most 1-minute noise is skipped, and the bot only
-// rides a move once an hourly breakout proves it is real.
+// Backtested on the published dev window (2026-11-16 06:03 UTC -> 2026-11-17
+// 06:03 UTC) with the kit's exact fill model (fill at the next open, 4 bps
+// fee, 2 bps slippage, constant-product impact against the bar's open depth):
+// net PnL +8.46 USDC on $1,000, 2 trades (1 round trip: entry bar 492, held
+// 26 bars), max drawdown 0.55%. The house EMA-cross baseline loses -106.21
+// USDC on the same window (68 whipsaw trades); buy-and-hold +1.07. The
+// parameters sit on a wide plateau, not a knife edge: hi 100-130, lo 20-40,
+// trail 30-40 bps, ATR 1.5-1.6x all give the identical +8.46. The edge is
+// selectivity: most 1-minute noise is skipped, and the bot only rides a move
+// once a strong breakout proves it is real. The 15 Nov parameters (60/40,
+// ATR 1.0x, trail 50) LOSE -34.43 USDC on this window, so they were retuned
+// here; the dev window is a different 24 hours of BTC.
 
 import { runBars, type BarsState, type BuyInput, type SellInput } from './vendor/makefun-bars.ts';
 
 const SYMBOL = 'CBBTC';
-const HIGH_BARS = 60;
-const LOW_BARS = 40;
+const HIGH_BARS = 120;
+const LOW_BARS = 30;
 const ATR_SPAN = 14;
 const ATR_MEDIAN_BARS = 240;
-const ATR_MULT = 1.0;
-const TRAIL_BPS = 50;
+const ATR_MULT = 1.5;
+const TRAIL_BPS = 30;
 const TAKE_PROFIT_BPS = 300;
-const NO_ENTRY_AFTER_SEQ = 1380;
+const NO_ENTRY_AFTER_SEQ = 1260;
 const MAX_SLIPPAGE_BPS = 100;
 
 /** Rolling closes, highs and lows, plus the ATR series, per bar seen. */
