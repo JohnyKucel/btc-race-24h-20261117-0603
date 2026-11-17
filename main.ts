@@ -95,6 +95,32 @@ function minOf(xs: number[], from: number, to: number): number {
   return m;
 }
 
+/** The three exit levels, each a named predicate over the held position. */
+type ExitReason = 'take-profit' | 'trailing-stop' | 'low-break';
+
+/** (c) take-profit: position value at +130 bps over cost. */
+function takeProfitHit(value: bigint, cost: bigint): boolean {
+  return value * 10000n >= cost * BigInt(10000 + TAKE_PROFIT_BPS);
+}
+
+/** (b) trailing stop: close 30 bps below the highest close since entry. */
+function trailingStopHit(close: number, peak: number): boolean {
+  return BigInt(close) * 10000n <= BigInt(peak) * BigInt(10000 - TRAIL_BPS);
+}
+
+/** (a) close below the lowest low of the previous 30 bars. */
+function lowBreakHit(close: number, i: number): boolean {
+  return i >= LOW_BARS && close < minOf(lows, i - LOW_BARS, i);
+}
+
+/** First exit level that holds, in priority order (c), (b), (a); null while holding. */
+function exitReason(value: bigint, cost: bigint, close: number, peak: number, i: number): ExitReason | null {
+  if (takeProfitHit(value, cost)) return 'take-profit';
+  if (trailingStopHit(close, peak)) return 'trailing-stop';
+  if (lowBreakHit(close, i)) return 'low-break';
+  return null;
+}
+
 await runBars({
   onBatch(state: BarsState, batch): (BuyInput | SellInput)[] {
     let fresh = false;
@@ -117,20 +143,7 @@ await runBars({
     if (held !== undefined) {
       peak = peak === null ? close : Math.max(peak, close);
       const qty = held.qty;
-      const cost = held.cost;
-      const value = state.value(SYMBOL, qty);
-      // (c) take-profit at +130 bps over cost.
-      if (value * 10000n >= cost * BigInt(10000 + TAKE_PROFIT_BPS)) {
-        peak = null;
-        return [{ side: 'sell', symbol: SYMBOL, qty, max_slippage_bps: MAX_SLIPPAGE_BPS }];
-      }
-      // (b) trailing stop 30 bps below the highest close since entry.
-      if (BigInt(close) * 10000n <= BigInt(peak) * BigInt(10000 - TRAIL_BPS)) {
-        peak = null;
-        return [{ side: 'sell', symbol: SYMBOL, qty, max_slippage_bps: MAX_SLIPPAGE_BPS }];
-      }
-      // (a) close below the lowest low of the previous 30 bars.
-      if (i >= LOW_BARS && close < minOf(lows, i - LOW_BARS, i)) {
+      if (exitReason(state.value(SYMBOL, qty), held.cost, close, peak, i) !== null) {
         peak = null;
         return [{ side: 'sell', symbol: SYMBOL, qty, max_slippage_bps: MAX_SLIPPAGE_BPS }];
       }
